@@ -1,0 +1,920 @@
+---
+title: "Public Attitudes Toward AI and Regulation in the United States"
+format: 
+  pdf:
+    keep-tex: true
+execute:
+  echo: false
+  warning: false
+  message: false
+header-includes:
+  - \KOMAoption{captions}{tableheading}
+  - \usepackage{tabularray}
+  - \usepackage{ninecolors}
+  - \usepackage{siunitx}
+---
+
+## Stakeholder
+
+This analysis is prepared for Duncan Rankin, Senior Policy Advisor to the U.S. Senate Committee on Commerce, Science, and Transportation. The Committee is currently evaluating potential federal frameworks for AI oversight, and Rankin is responsible for briefing senators on where public support or resistance to AI regulation is likely to come from. He needs to know which demographic and ideological groups are most concerned about over- or under-regulation, and how these concerns vary with confidence in the federal government. These insights will help the Committee anticipate political friction, tailor communication strategies, and design AI regulatory proposals that are both politically feasible and publicly defensible.
+
+## Executive Summary
+
+Artificial Intelligence (AI) is reshaping American society, yet public consensus remains elusive. Drawing on a nationally representative survey of more than 5,400 U.S. adults conducted by the Pew Research Center in August 2024, this report examines who feels optimistic versus pessimistic about AI’s long-term impact and who fears that government regulation will “go too far” versus “not far enough”.
+
+**Key Findings:**
+
+-   **Ideology and demographics shape AI optimism.** Men, ideological liberals, higher-income respondents, and racial minorities are more optimistic about AI’s long-term impact than women, conservatives, and lower-income White respondents, even after accounting for age and education. Adults aged 50–64 are the most pessimistic group.
+
+-   **Trust in government conditions regulatory fears.** Among Americans who trust the federal government’s competence, conservatives are much more likely than liberals to fear that AI regulation will “go too far”. Among those who lack confidence in the federal government, ideological differences are much smaller, and overall concern about over-regulation is lower than among high-trust respondents.
+
+-   **Racial experiences shape views of AI governance.** Black Americans are notably more likely than White respondents to fear over-regulation of AI, even after controlling for ideology, trust, and demographics, suggesting that historical experiences with state power shape how AI governance is perceived.
+
+**Implications:**
+
+Effective AI regulation cannot rely on broad partisan messaging alone. To build durable public support, policymakers must tailor communication to skeptical groups such as middle-aged and lower-income White voters and invest in demonstrating technical competence and institutional accountability, especially to communities that have historically borne the costs of over-policing and surveillance.
+
+## Background & Research Questions
+
+Artificial intelligence (AI) is moving quickly from specialized tools into everyday life. Workers use large language models to draft and summarize text, firms use AI to automate decisions, and public agencies are beginning to experiment with AI in service delivery and oversight. As these systems spread, public attitudes toward AI will influence which policies are politically feasible and which technologies citizens are willing to accept.
+
+In August 2024, Pew Research Center’s American Trends Panel (Wave 152, *Americans’ Views of Artificial Intelligence*) surveyed over 5,400 U.S. adults about AI’s long-term impact on the United States and whether government regulation of AI is more likely to “go too far” or “not far enough.” We use these data to examine how demographic and political factors shape optimism or pessimism about AI and concern about over- versus under-regulation, providing evidence to inform U.S. policymakers and staff.
+
+We address two research questions:
+
+1.  **Who is optimistic about AI’s long-term impact?**
+
+    Which demographic factors (for example age, education, race, income, gender) and political beliefs (for example party identification, ideological self-placement) are associated with more optimistic versus more pessimistic views of AI’s long-term impact on the United States?
+
+2.  **Who fears over- versus under-regulation of AI?**
+
+    After accounting for demographics, how do political factors, especially ideology, party, and confidence in the federal government, shape whether people are more concerned that government regulation of AI will “go too far” or “not go far enough”?
+
+```{r}
+library(tidyverse)
+library(haven)
+library(survey)
+library(ggplot2)
+library(patchwork)
+library(scales)
+library(polycor)
+library(corrplot)
+library(emmeans)
+library(modelsummary)
+library(kableExtra)
+
+# Read CSV from zip file
+atp_data <- read.csv(unz("../data/W152_Aug24.zip", "W152_Aug24/ATP W152.csv"))
+
+atp_data_clean <- atp_data |>
+  mutate(
+    outcome_binary = case_when(
+      as.vector(AIREG_W152) == 1 ~ 1, 
+      as.vector(AIREG_W152) == 2 ~ 0,
+      TRUE ~ NA_real_
+    ),
+    
+    aichange_f = case_when(
+      as.vector(AICHANGE_W152) == 1 ~ "Very positive",
+      as.vector(AICHANGE_W152) == 2 ~ "Somewhat positive",
+      as.vector(AICHANGE_W152) == 3 ~ "Equally positive and negative",
+      as.vector(AICHANGE_W152) == 4 ~ "Somewhat negative",
+      as.vector(AICHANGE_W152) == 5 ~ "Very negative",
+      TRUE ~ NA_character_
+    ),
+    
+    # Ideology
+    ideo_f = case_when(
+      as.vector(F_IDEO) == 1 ~ "Very conservative",
+      as.vector(F_IDEO) == 2 ~ "Conservative",
+      as.vector(F_IDEO) == 3 ~ "Moderate",
+      as.vector(F_IDEO) == 4 ~ "Liberal",
+      as.vector(F_IDEO) == 5 ~ "Very liberal",
+      TRUE ~ NA_character_
+    ),
+    
+    # Confidence in Government
+    conf_gov_f = case_when(
+      as.vector(REGCONFG_W152) %in% c(1, 2) ~ "Has Confidence",
+      as.vector(REGCONFG_W152) %in% c(3, 4) ~ "No Confidence",
+      TRUE ~ NA_character_
+    ),
+    
+    # Education
+    edu_f = case_when(
+      as.vector(F_EDUCCAT) == 1 ~ "College graduate+",
+      as.vector(F_EDUCCAT) == 2 ~ "Some College",
+      as.vector(F_EDUCCAT) == 3 ~ "H.S. graduate or less",
+      TRUE ~ NA_character_
+    ),
+    
+    # --- 3. Demographics ---
+    party_f = case_when(
+      as.vector(F_PARTY_FINAL) == 1 ~ "Republican",
+      as.vector(F_PARTY_FINAL) == 2 ~ "Democrat",
+      as.vector(F_PARTY_FINAL) == 3 ~ "Independent",
+      as.vector(F_PARTY_FINAL) == 4 ~ "Something else",
+      TRUE ~ NA_character_
+    ),
+    
+    age_f = case_when(
+      as.vector(F_AGECAT) == 1 ~ "18-29",
+      as.vector(F_AGECAT) == 2 ~ "30-49",
+      as.vector(F_AGECAT) == 3 ~ "50-64",
+      as.vector(F_AGECAT) == 4 ~ "65+",
+      TRUE ~ NA_character_
+    ),
+    
+    race_f = case_when(
+      as.vector(F_RACETHNMOD) == 1 ~ "White",
+      as.vector(F_RACETHNMOD) == 2 ~ "Black",
+      as.vector(F_RACETHNMOD) == 3 ~ "Hispanic",
+      as.vector(F_RACETHNMOD) == 4 ~ "Asian",
+      as.vector(F_RACETHNMOD) == 5 ~ "Other",
+      TRUE ~ NA_character_
+    ),
+    
+    gender_f = case_when(
+      as.vector(F_GENDER) == 1 ~ "Male",
+      as.vector(F_GENDER) == 2 ~ "Female",
+      TRUE ~ NA_character_
+    ),
+    
+    census_f = case_when(
+      as.vector(F_CREGION) == 1 ~ "Northeast",
+      as.vector(F_CREGION) == 2 ~ "Midwest",
+      as.vector(F_CREGION) == 3 ~ "South",
+      as.vector(F_CREGION) == 4 ~ "West",
+      TRUE ~ NA_character_
+    ),
+    
+    metro_f = case_when(
+      as.vector(F_METRO) == 1 ~ "Metropolitan",
+      as.vector(F_METRO) == 2 ~ "Non-metropolitan",
+      TRUE ~ NA_character_
+    ),
+    
+    income_f = case_when(
+      as.vector(F_INC_TIER2) == 1 ~ "Lower income",
+      as.vector(F_INC_TIER2) == 2 ~ "Middle income",
+      as.vector(F_INC_TIER2) == 3 ~ "Upper income",
+      TRUE ~ NA_character_
+    )
+  ) |>
+  mutate(
+    aichange_f = fct_relevel(aichange_f, "Very positive", "Somewhat positive", 
+                             "Equally positive and negative", "Somewhat negative", "Very negative"),
+    conf_gov_f = fct_relevel(conf_gov_f, "Has Confidence"), 
+    ideo_f = fct_relevel(ideo_f, "Moderate"),
+    edu_f = fct_relevel(edu_f, "H.S. graduate or less"),
+    race_f = fct_relevel(race_f, "White"),
+    age_f = fct_relevel(age_f, "18-29"),
+    party_f = fct_relevel(party_f, "Democrat"),
+    income_f = fct_relevel(income_f, "Lower income", "Middle income", "Upper income")
+  ) |>
+  select(outcome_binary, aichange_f, ideo_f, conf_gov_f, edu_f, age_f, 
+         race_f, party_f, gender_f, census_f, metro_f, income_f, WEIGHT_W152)
+```
+
+## Research Question 1 – Who Is Optimistic about AI’s Long-Term Impact?
+
+We model respondents’ views on AI’s long-term impact using a survey-weighted ordered regression, with responses ranging from “very negative” to “very positive”. We focus on how the probability of holding a negative view changes across groups, while holding other factors, such as age, education, race, income, and gender, constant.
+
+**Ideology and gender are central predictors**
+
+Political ideology is the strongest predictor of AI sentiment. Moving from very conservative to liberal is associated with a steady shift toward more positive views of AI’s long-term impact, even after adjusting for demographics. Moderates are more likely than conservatives to say AI’s long-term impact will be positive, while liberals are even more likely to say it will be positive.
+
+The pattern is not strictly linear. The very liberal group is less optimistic than liberals and appears somewhat more cautious, suggesting that some of the most progressive Americans view AI as a potential structural risk rather than an unqualified opportunity.
+
+Gender is another robust predictor. Across ideological groups, men are consistently more optimistic about AI than women. Holding other factors constant, men are about one-third more likely than women to express a positive view of AI’s long-term impact. The gender and ideology effects appear to be additive: Being male and being liberal each make a respondent more optimistic, but their combination does not create a special “boost”.
+
+```{r model data (RQ1) for plots}
+# Complete cases
+model_data <- atp_data_clean %>%
+  filter(complete.cases(aichange_f, ideo_f, edu_f, age_f, race_f, gender_f, income_f)) %>%
+  mutate(
+    ideo_f = fct_relevel(ideo_f, "Very conservative"), 
+    race_f = fct_relevel(factor(race_f), "White"),     
+    gender_f = fct_relevel(factor(gender_f), "Female"),
+    income_f = fct_relevel(income_f, "Lower income")
+  )
+
+# Survey design
+atp_design <- svydesign(ids = ~1, weights = ~WEIGHT_W152, data = model_data)
+
+# Final model
+model_final <- svyolr(
+  aichange_f ~ ideo_f + edu_f + age_f + race_f * income_f + gender_f,
+  design = atp_design
+)
+
+# Interaction models for testing
+# model_interaction <- svyolr(
+#   aichange_f ~ ideo_f + edu_f + age_f + race_f * income_f + gender_f,
+#   design = atp_design
+# )
+```
+
+```{r gender-ideology-predictions, fig.height=5, fig.width=9, fig.cap="Gender differences in AI sentiment across political ideology"}
+# Simpler approach: manually calculate predictions using coefficient lookup
+calc_predictions <- function(model, pred_data) {
+  coefs <- coef(model)
+  thresholds <- model$zeta
+  
+  results <- list()
+  
+  for (i in 1:nrow(pred_data)) {
+    # Start with baseline (all reference categories = 0)
+    eta <- 0
+    
+    # Add coefficients for non-reference levels
+    row <- pred_data[i, ]
+    
+    # Ideology (ref: Very conservative)
+    if (row$ideo_f == "Conservative") {
+      eta <- eta + coefs["ideo_fConservative"]
+    } else if (row$ideo_f == "Moderate") {
+      eta <- eta + coefs["ideo_fModerate"]
+    } else if (row$ideo_f == "Liberal") {
+      eta <- eta + coefs["ideo_fLiberal"]
+    } else if (row$ideo_f == "Very liberal") {
+      eta <- eta + coefs["ideo_fVery liberal"]
+    }
+    
+    # Education (ref: H.S. or less)
+    if (row$edu_f == "Some College") {
+      eta <- eta + coefs["edu_fSome College"]
+    } else if (row$edu_f == "College graduate+") {
+      eta <- eta + coefs["edu_fCollege graduate+"]
+    }
+    
+    # Age (ref: 18-29)
+    if (row$age_f == "30-49") {
+      eta <- eta + coefs["age_f30-49"]
+    } else if (row$age_f == "50-64") {
+      eta <- eta + coefs["age_f50-64"]
+    } else if (row$age_f == "65+") {
+      eta <- eta + coefs["age_f65+"]
+    }
+    
+    # Race (ref: White) - skip, all White in pred_grid
+    
+    # Gender (ref: Female)
+    if (row$gender_f == "Male") {
+      eta <- eta + coefs["gender_fMale"]
+    }
+    
+    # Income (ref: Lower income)
+    if (row$income_f == "Middle income") {
+      eta <- eta + coefs["income_fMiddle income"]
+    } else if (row$income_f == "Upper income") {
+      eta <- eta + coefs["income_fUpper income"]
+    }
+    
+    # Calculate probability of negative (Y > 3)
+    prob_positive <- plogis(thresholds[3] - eta)
+    
+    results[[i]] <- tibble(
+      prob_positive = prob_positive
+    )
+  }
+  
+  bind_rows(results)
+}
+
+# Create prediction grid - Gender × Ideology at MODAL values
+pred_grid <- expand_grid(
+  gender_f = factor(c("Female", "Male"), levels = levels(model_data$gender_f)),
+  ideo_f = factor(c("Very conservative", "Conservative", "Moderate", 
+                    "Liberal", "Very liberal"),
+                  levels = levels(model_data$ideo_f)),
+  edu_f = factor("College graduate+", levels = levels(model_data$edu_f)),  # MODAL
+  age_f = factor("30-49", levels = levels(model_data$age_f)),  # MODAL
+  race_f = factor("White", levels = levels(model_data$race_f)),  # MODAL
+  income_f = factor("Middle income", levels = levels(model_data$income_f))  # MODAL
+)
+
+# Get predictions
+pred_results <- calc_predictions(model_final, pred_grid)
+pred_data <- bind_cols(pred_grid, pred_results)
+
+pred_data$ideo_f <- factor(
+  pred_data$ideo_f,
+  levels = c("Very conservative", "Conservative", "Moderate", "Liberal", "Very liberal")
+)
+
+# Plot (no error bars)
+pred_data %>% 
+  ggplot(aes(x = ideo_f, y = prob_positive, 
+                      color = gender_f, group = gender_f)) +
+  geom_line(size = 1.5) +
+  geom_point(size = 4) +
+  scale_color_manual(
+    values = c("Female" = "#E74C3C", "Male" = "#3498DB"),
+    name = "Gender"
+  ) +
+  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  labs(
+    title = "Impact of Gender and Political Ideology on AI Sentiment",
+    x = "Political Ideology",
+    y = "Predicted Probability of Positive Sentiment",
+    subtitle = "College graduate+, Age 30-49, White, Middle income Respondents"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid.minor = element_blank()
+  )
+```
+
+**Age, race, and income also matter**
+
+Age shows a non-linear pattern. Younger adults are relatively optimistic about AI’s long-term impact, while middle-aged adults, especially those aged 50–64, are the most pessimistic group, even after we hold education and income constant. This may reflect greater perceived exposure to workplace disruption among people who are still in the labor force but did not grow up with AI tools, though this interpretation is speculative, as the survey does not capture respondents’ reasons for their attitudes holistically.
+
+Race and income jointly shape AI sentiment. On average, racial minorities, particularly Black and Hispanic respondents, are more optimistic about AI’s long-term impact than White respondents once we control for age, education, ideology, and other factors. Among Whites, higher-income respondents are much less likely to hold negative views of AI than lower-income Whites. Among Black and Hispanic respondents, income gradients are flatter, so differences between low- and high-income respondents are smaller. Low-income White respondents therefore emerge as one of the most skeptical groups.
+
+It is certainly worth noting that respondents who are not White, Black, Hispanic, or Asian on average have a significantly higher positive sentiment than those who do fit in those groups. Another significant change occurs with upper income Hispanic respondents, who have a high positive sentiment toward AI.
+
+```{r race-income-plot, fig.height=5, fig.width=9, results='hide', fig.cap="Positive AI sentiment by race and income level"}
+
+model_data %>%
+  group_by(aichange_f) %>%
+  distinct() %>%
+  count()
+# Create descriptive plot
+plot_data <- model_data %>%
+  group_by(race_f, income_f, aichange_f) %>%
+  summarise(wt = sum(WEIGHT_W152), .groups = "drop") %>%
+  group_by(race_f, income_f) %>%
+  mutate(pct = wt / sum(wt) * 100) %>%
+  filter(aichange_f %in% c("Very positive", "Somewhat positive")) %>%
+  summarise(pct_positive = sum(pct), .groups = "drop")
+
+ggplot(plot_data, aes(
+  x = income_f,
+  y = pct_positive,
+  color = race_f,
+  group = race_f
+)) +
+  geom_line(size = 1.4) +
+  geom_point(size = 4) +
+  scale_color_manual(
+    values = c(
+      "White" = "#E74C3C",
+      "Asian" = "#F39C12",
+      "Black" = "#27AE60",
+      "Hispanic" = "#3498DB",
+      "Other" = "#9B59B6"
+    ),
+    name = "Race/Ethnicity"
+  ) +
+  scale_y_continuous(
+    limits = c(0, 100),
+    breaks = seq(0, 100, 10),
+    labels = function(x) paste0(x, "%")
+  ) +
+  labs(
+    title = "Impact of Race and Income Level on AI Sentiment",
+    subtitle = "Race × Income interaction: F = 1.91, p = 0.055",
+    x = "Income Level",
+    y = "Percentage with Positive Sentiment"
+  ) +
+  theme_minimal(base_size = 13) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16),
+    plot.subtitle = element_text(size = 12, margin = margin(b = 10)),
+    axis.title.x = element_text(margin = margin(t = 10)),
+    axis.title.y = element_text(margin = margin(r = 10)),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    legend.position = "bottom",
+    legend.title = element_text(face = "bold"),
+    panel.grid.minor = element_blank()
+  )
+
+```
+
+Educational attainment shows a modest relationship with AI sentiment. Respondents with a bachelor’s degree or higher tend to be somewhat more optimistic than those with a high school education or less, but much of this difference is captured by ideological self-placement once we account for politics directly.
+
+## Research Question 2 – Who Fears Over- vs Under-Regulation of AI?
+
+We model respondents’ answers to the regulation question using a survey-weighted logistic regression. The outcome distinguishes respondents who are more concerned about over-regulation from those who are more concerned about under-regulation. We focus on political ideology, partisan identification, and confidence in the federal government’s competence, while controlling for standard demographics.
+
+**Trust in government is the key fault line**
+
+Confidence in the federal government is the strongest predictor of attitudes toward AI regulation. Holding ideology, party, and demographics constant, respondents who lack confidence in the federal government are substantially less likely to fear that AI regulation will “go too far” than those who express confidence. Those who lack confidence in government have roughly 60 percent lower odds of expressing concern about over-regulation than the odds for high-trust respondents.
+
+This suggests that anxiety about over-regulation is concentrated among people who still have some institutional trust and who therefore take the possibility of active regulation seriously. Many low-trust respondents are skeptical of government involvement in AI in general, but they are less likely than high-trust respondents to single out over-regulation as their main concern.
+
+```{r survey-design, warning=FALSE, echo=FALSE}
+rq2_data <- atp_data_clean |>
+  filter(!is.na(outcome_binary) & !is.na(conf_gov_f))
+
+# Survey Design
+svy_des <- svydesign(ids = ~1, data = rq2_data, weights = ~WEIGHT_W152)
+```
+
+```{r rq2-modeling, warning=FALSE, echo=FALSE}
+# Model 1: Main Effects
+model_main <- svyglm(
+  outcome_binary ~ ideo_f + conf_gov_f + edu_f + party_f + age_f + race_f + gender_f, 
+  design = svy_des, 
+  family = quasibinomial(link = "logit") 
+)
+
+# Model 2: Interaction (Ideology * Confidence in Gov)
+model_inter <- svyglm(
+  outcome_binary ~ ideo_f * conf_gov_f + edu_f + party_f + age_f + race_f + gender_f, 
+  design = svy_des, 
+  family = quasibinomial(link = "logit")
+)
+
+# AIC
+aic_main <- AIC(model_main)
+aic_inter <- AIC(model_inter)
+
+#print(paste("AIC Main:", aic_main))
+#print(paste("AIC Interaction:", aic_inter))
+```
+
+```{r, fig.height=4, fig.width=9, fig.cap="Ideological Differences in Fear of Over-Regulation, by Trust in Government"}
+emm <- emmeans(model_inter, ~ ideo_f | conf_gov_f, type = "response")
+
+emmip(emm, conf_gov_f ~ ideo_f, CIs = TRUE) +
+  scale_x_discrete(
+    limits = c("Very conservative",
+               "Conservative",
+               "Moderate",
+               "Liberal",
+               "Very liberal")
+  ) +
+  labs(
+    title = "Fear of Over-Regulation by Ideology and Trust",
+    y = "Prob. of saying 'Gov goes too far'",
+    x = "Political Ideology",
+    color = "Confidence in Gov"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+**Ideological polarization depends on trust**
+
+Ideology still matters, but mainly within the group that trusts government competence. Among respondents who express confidence in the federal government, conservatives are much more likely than liberals to worry that AI regulation will “go too far” rather than “not far enough”, while high-trust liberals are more likely to worry about under-regulation.
+
+Among respondents who lack confidence in the federal government, ideological differences are much smaller. Low-trust liberals and low-trust conservatives have closer predicted probabilities of fearing over-regulation, and overall low-trust respondents are somewhat less likely to prioritize over-regulation than high-trust respondents.
+
+**Race and other demographics**
+
+Black respondents are significantly more likely than White respondents to fear that AI regulation will “go too far”, even after we adjust for political ideology, confidence in government, and demographic controls. This pattern may reflect distinct historical experiences with both under-regulation and over-regulation, such as exposure to harmful technologies, discriminatory practices, and disproportionate surveillance.
+
+Once ideology, party, and trust are taken into account, other demographic differences, such as gender, age, and education, play a more modest role in predicting concern about over- versus under-regulation.
+
+## Implications and Recommendations
+
+Our findings show that attitudes toward AI and its regulation are structured by ideology, demographics, and confidence in government. Optimism about AI’s long term impact is concentrated among men, liberals, higher income respondents, and many racial minorities, while women, conservatives, and lower income White adults, especially those in middle age, are more skeptical. Rankin and the Committee should therefore avoid a single generic narrative about AI and instead address concrete concerns about jobs, control, and fairness for skeptical groups.
+
+Confidence in the federal government is the strongest predictor of views on AI regulation. High trust conservatives are most likely to fear that regulation will “go too far”, while low trust respondents of all ideologies are less focused on over regulation. Building support for AI governance will require visible competence and transparency, for example clear explanations of how AI is used in public services, what safeguards exist, and how mistakes are corrected. Black respondents show distinct concern about over regulation even after we account for ideology and trust, which points to the need to involve affected communities in rule making and to evaluate distributional impacts in areas such as policing, credit, and employment.
+
+## Technical Appendix
+
+## Research Question 1
+
+### Data and Methods
+
+This analysis uses Pew Research Center's American Trends Panel Wave 152 (August 2024), a nationally representative survey of U.S. adults (N=5,410). Survey weights (WEIGHT_W152) account for differential selection probabilities and nonresponse.
+
+**Missing data:** Of 5,410 respondents, 1,149 (21.2%) had missing data on key variables. Complete case analysis retained 4,272 observations (78.8% retention). Since ideology is our primary predictor, missingness patterns introduce less bias for our main research question. Survey weights partially adjust for differential nonresponse.
+
+```{r}
+
+# Missing data analysis - matching final model variables
+missing_summary <- atp_data_clean |>
+  summarise(
+    total_n = n(),
+    aichange_missing = sum(is.na(aichange_f)),
+    ideo_missing = sum(is.na(ideo_f)),
+    edu_missing = sum(is.na(edu_f)),
+    age_missing = sum(is.na(age_f)),
+    race_missing = sum(is.na(race_f)),
+    gender_missing = sum(is.na(gender_f)),
+    income_missing = sum(is.na(income_f))
+  )
+
+complete_cases_count <- atp_data_clean |>
+  select(aichange_f, ideo_f, edu_f, age_f, race_f, gender_f, income_f) |>
+  complete.cases() |>
+  sum()
+
+missing_summary <- missing_summary |>
+  mutate(complete_cases = complete_cases_count)
+
+# Visualization
+missing_viz <- atp_data_clean |>
+  summarise(across(
+    c(aichange_f, ideo_f, edu_f, age_f, race_f, gender_f, income_f),
+    ~sum(is.na(.)),
+    .names = "missing_{.col}"
+  )) |>
+  pivot_longer(
+    everything(),
+    names_to = "variable",
+    values_to = "missing_count"
+  ) |>
+  mutate(
+    variable = str_remove(variable, "missing_"),
+    variable = str_remove(variable, "_f"),
+    variable = case_when(
+      variable == "aichange" ~ "AI Sentiment",
+      variable == "ideo" ~ "Political Ideology",
+      variable == "edu" ~ "Education",
+      variable == "age" ~ "Age",
+      variable == "race" ~ "Race/Ethnicity",
+      variable == "gender" ~ "Gender",
+      variable == "income" ~ "Income",
+      TRUE ~ variable
+    ),
+    missing_percent = missing_count / nrow(atp_data_clean) * 100
+  )
+
+# ggplot(missing_viz, aes(x = reorder(variable, missing_count), y = missing_count)) +
+#   geom_col(fill = "#E74C3C") +
+#   geom_text(aes(label = sprintf("%d (%.1f%%)", missing_count, missing_percent)), 
+#             hjust = -0.1, size = 2) +
+#   coord_flip() +
+#   scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +  # ADD THIS LINE
+#   labs(
+#     title = "Missing Data by Variable",
+#     x = "Variable",
+#     y = "Number of Missing Values"
+#   ) +
+#   theme_minimal() +
+#   theme(plot.title = element_text(face = "bold"))
+```
+
+```{r}
+missing_table <- tibble(
+  Variable = c("AI Sentiment (outcome)", "Political Ideology", "Education", 
+               "Age", "Race/Ethnicity", "Gender", "Income"),
+  Missing_Count = c(
+    sum(is.na(atp_data_clean$aichange_f)),
+    sum(is.na(atp_data_clean$ideo_f)),
+    sum(is.na(atp_data_clean$edu_f)),
+    sum(is.na(atp_data_clean$age_f)),
+    sum(is.na(atp_data_clean$race_f)),
+    sum(is.na(atp_data_clean$gender_f)),
+    sum(is.na(atp_data_clean$income_f))
+  ),
+  Percent_Missing = round(c(
+    sum(is.na(atp_data_clean$aichange_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$ideo_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$edu_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$age_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$race_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$gender_f)) / nrow(atp_data_clean) * 100,
+    sum(is.na(atp_data_clean$income_f)) / nrow(atp_data_clean) * 100
+  ), 2)
+)
+```
+
+```{r}
+missing_by_group <- bind_rows(
+  atp_data_clean %>%
+    filter(!is.na(ideo_f)) %>%
+    group_by(Category = "Ideology", Level = as.character(ideo_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop"),
+  
+  atp_data_clean %>%
+    filter(!is.na(edu_f)) %>%
+    group_by(Category = "Education", Level = as.character(edu_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop"),
+  
+  atp_data_clean %>%
+    filter(!is.na(age_f)) %>%
+    group_by(Category = "Age", Level = as.character(age_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop"),
+  
+  atp_data_clean %>%
+    filter(!is.na(race_f)) %>%
+    group_by(Category = "Race/Ethnicity", Level = as.character(race_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop"),
+  
+  atp_data_clean %>%
+    filter(!is.na(gender_f)) %>%
+    group_by(Category = "Gender", Level = as.character(gender_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop"),
+  
+  atp_data_clean %>%
+    filter(!is.na(income_f)) %>%
+    group_by(Category = "Income", Level = as.character(income_f)) %>%
+    summarise(N = n(), Missing = sum(is.na(aichange_f)), 
+              `% Missing` = round(100 * Missing / N, 1), .groups = "drop")
+)
+
+# 2. Chi-square tests for non-random missingness (all 6 predictors)
+# Ideology
+test_ideo <- atp_data_clean %>%
+  filter(!is.na(ideo_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_ideo <- chisq.test(table(test_ideo$ideo_f, test_ideo$outcome_missing))
+
+# Education
+test_edu <- atp_data_clean %>%
+  filter(!is.na(edu_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_edu <- chisq.test(table(test_edu$edu_f, test_edu$outcome_missing))
+
+# Age
+test_age <- atp_data_clean %>%
+  filter(!is.na(age_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_age <- chisq.test(table(test_age$age_f, test_age$outcome_missing))
+
+# Race
+test_race <- atp_data_clean %>%
+  filter(!is.na(race_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_race <- chisq.test(table(test_race$race_f, test_race$outcome_missing))
+
+# Gender
+test_gender <- atp_data_clean %>%
+  filter(!is.na(gender_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_gender <- chisq.test(table(test_gender$gender_f, test_gender$outcome_missing))
+
+# Income
+test_income <- atp_data_clean %>%
+  filter(!is.na(income_f)) %>%
+  mutate(outcome_missing = is.na(aichange_f))
+chi_income <- chisq.test(table(test_income$income_f, test_income$outcome_missing))
+
+# Compile results
+missingness_tests <- tibble(
+  Variable = c("Political Ideology", "Education", "Age", "Race/Ethnicity", "Gender", "Income"),
+  `Chi-square` = c(chi_ideo$statistic, chi_edu$statistic, chi_age$statistic,
+                   chi_race$statistic, chi_gender$statistic, chi_income$statistic),
+  df = c(chi_ideo$parameter, chi_edu$parameter, chi_age$parameter,
+         chi_race$parameter, chi_gender$parameter, chi_income$parameter),
+  `p-value` = c(chi_ideo$p.value, chi_edu$p.value, chi_age$p.value,
+                chi_race$p.value, chi_gender$p.value, chi_income$p.value)
+)
+# Faceted bar chart showing missingness by demographic level
+missingness_by_level <- missing_by_group %>%
+  ggplot(aes(x = reorder(Level, `% Missing`), y = `% Missing`, fill = `% Missing`)) +
+  geom_col() +
+  geom_text(aes(label = sprintf("%.1f%%", `% Missing`)), 
+            hjust = -0.1, size = 3) +
+  scale_fill_gradient(low = "#FEF5E7", high = "#E74C3C", guide = "none") +
+  scale_y_continuous(limits = c(0, 25), expand = expansion(mult = c(0, 0.1))) +
+  coord_flip() +
+  facet_wrap(~ Category, scales = "free_y", ncol = 2) +
+  labs(
+    title = "Missingness Rates Vary by Demographic Group",
+    subtitle = "Age 65+ and H.S. education show highest rates (22%)",
+    x = NULL,
+    y = "Percentage Missing (%)"
+  ) +
+  theme_minimal() +
+  theme(
+    strip.text = element_text(face = "bold", size = 11),
+    plot.title = element_text(face = "bold", size = 12),
+    panel.spacing = unit(1, "lines")
+  )
+
+missingness_by_level
+```
+
+**Feature Engineering:** Education was collapsed from finer categories into three levels (H.S. or less, Some college, College graduate+) to ensure adequate cell sizes. All other variables used original Pew categories.
+
+**Model Specification:** We used survey-weighted ordered logistic regression (proportional odds model) to predict AI sentiment. This approach models cumulative probabilities across ordered categories.The outcome variable measures respondents' views on AI's long-term impact on the United States, coded as an ordered factor with five levels: Very positive (1), Somewhat positive (2), Equally positive and negative (3), Somewhat negative (4), and Very negative (5). The model estimates the odds of having more negative sentiment (moving to a higher category). Therefore, odds ratios less than 1 indicate lower odds of expressing negative sentiment (i.e., more optimistic views), while odds ratios greater than 1 indicate higher odds of negative sentiment (more pessimistic views)
+
+**Model Development**
+
+-   **Interaction testing**: We tested whether income effects varied by race. The Race × Income interaction was marginally significant (F=1.91, p=0.055), with descriptive analyses showing that White and Asian respondents exhibit strong income gradients in AI sentiment, while Black and Hispanic respondents show relatively flat patterns across income levels.
+
+-   **Final model:**: The specification includes six main predictors (ideology, education, age, race, gender, income) and a Race × Income interaction term. All main effects were significant at p\<0.001, and the interaction was retained given theoretical interest and empirical support (p=0.055).
+
+### Model Results (Refer to table 1)
+
+```{r rq1-table, warning=FALSE, echo=FALSE, results='asis'}
+library(kableExtra)
+rename_map <- c(
+  "ideo_fConservative" = "Conservative",
+  "ideo_fModerate" = "Moderate",
+  "ideo_fLiberal" = "Liberal",
+  "ideo_fVery liberal" = "Very Liberal",
+  "edu_fSome College" = "Some College",
+  "edu_fCollege graduate+" = "College Graduate+",
+  "age_f30-49" = "Age 30-49",
+  "age_f50-64" = "Age 50-64",
+  "age_f65+" = "Age 65+",
+  "race_fAsian" = "Asian",
+  "race_fBlack" = "Black",
+  "race_fHispanic" = "Hispanic",
+  "race_fOther" = "Other Race",
+  "gender_fMale" = "Male",
+  "income_fMiddle income" = "Middle Income",
+  "income_fUpper income" = "Upper Income",
+  "race_fAsian:income_fMiddle income" = "Asian × Middle Income",
+  "race_fAsian:income_fUpper income" = "Asian × Upper Income",
+  "race_fBlack:income_fMiddle income" = "Black × Middle Income",
+  "race_fBlack:income_fUpper income" = "Black × Upper Income",
+  "race_fHispanic:income_fMiddle income" = "Hispanic × Middle Income",
+  "race_fHispanic:income_fUpper income" = "Hispanic × Upper Income",
+  "race_fOther:income_fMiddle income" = "Other × Middle Income",
+  "race_fOther:income_fUpper income" = "Other × Upper Income"
+)
+
+modelsummary(
+  model_final,
+  exponentiate = TRUE,
+  stars = FALSE,
+  coef_rename = rename_map,
+  coef_omit = "\\|",
+  gof_map = c("nobs", "aic"),
+  statistic = "SE = {std.error}, p = {p.value}",  # Clearer format
+  fmt = 3,
+  output = "kableExtra",
+  title = "Survey-Weighted Ordered Logistic Regression with Race × Income Interaction (OR < 1 = More Optimistic)"
+) |>
+  kableExtra::kable_styling(
+    latex_options = c("scale_down", "hold_position"), 
+    font_size = 9
+  )
+```
+
+**Key findings:** Liberals most optimistic (OR=0.39, p\<0.001), though Very Liberals break this pattern (OR=0.76, p=0.117). Males 36% more optimistic than females (OR=0.64, p\<0.001). Middle-aged respondents (50-64) most pessimistic (OR=1.60, p\<0.001). The Race × Income interaction (F=1.91, p=0.055) reveals distinct patterns: among lower-income respondents, Black (OR=0.57) and Hispanic (OR=0.52) respondents are more optimistic than Whites. White respondents show strong income gradients (upper income OR=0.62), but this effect is attenuated for Black and Hispanic respondents (interaction ORs: 1.79 and 1.31), indicating income operates differently across racial groups.
+
+### Limitations and Next Steps
+
+**Proportional odds assumption:** We assessed coefficient stability across thresholds by fitting separate binary logistic regressions at each cut point. Most predictors showed overlapping confidence intervals across thresholds. The gender coefficient exhibited some heterogeneity (stronger effects at positive thresholds), though coefficients maintained consistent direction. While this represents a minor deviation from strict proportional odds, we retained the parsimonious model given the overall pattern of coefficient stability.
+
+**Missing data:** Missingness patterns reveal important demographic differences. Older adults (65+) and those with high school education or less were substantially more likely to skip the AI sentiment question (22% missing) compared to younger adults (18-29) and college graduates (8-10% missing). Multiple imputation would provide more robust estimates than complete case analysis.
+
+**Unmeasured confounders:** AI literacy, specific occupational characteristics, automation risk exposure, and media consumption patterns were not measured but likely influence AI attitudes.
+
+**Future directions:** Priority areas include oversampling minority groups to power interaction analyses; incorporating AI literacy and occupational automation risk measures; conducting panel surveys to assess attitude stability and change; and testing mediation hypotheses examining whether economic concerns mediate demographic effects on AI sentiment.
+
+## Research Question 2
+
+### Data and Methods
+
+**Data Preparation:**
+
+-   **Survey question:** Respondents were asked whether they are more concerned that government regulation of AI will “go too far regulating its use” or “not go far enough regulating its use.”
+
+-   **Original response categories:** `1` – “Go too far regulating its use”; `2` – “Not go far enough regulating its use”; `3` – “Not sure”; `99` – “Refused / Web blank”
+
+-   **Coding for the outcome variable:** Outcome = 1 for “go too far”; Outcome = 0 for “not go far enough”; “About right,” “not sure,” and nonresponses are treated as missing and excluded from the models.
+
+**Feature Engineering:** We incorporated a critical predictor, “Confidence in Government.”
+
+-   **Original response categories:** 1 = “A great deal”; 2 = “Quite a bit”; 3 = “Some”; 4 = “Not too much”; 5 = “None”; 6 = “Not sure”; 99 = “Refused / Web blank”
+-   **Coding in our analysis:**
+    -   Has Confidence = 1 for codes 1, 2, or 3
+    -   No Confidence = 0 for codes 4 or 5
+    -   Codes 6 (“Not sure”) and 99 (“Refused / Web blank”) are set to missing and excluded from the models.
+-   **Rationale:** This binary recoding reflects our assumption that the key distinction for regulatory attitudes is between respondents who have at least some confidence in the government and those who have little or none.
+
+**Modeling Approach:** We fitted survey-weighted logistic regression models to account for the complex sampling design. We compared a main effects model against an interaction model (`Ideology × Confidence`) using AIC. The interaction model yielded a lower AIC and offered superior theoretical interpretability.
+
+**Handling Missing Data:** Consistent with our exploratory data analysis, missing responses (e.g., "Not sure") in this dataset are non-random and significantly correlated with Age and Education. Specifically, older adults (65+) and those with lower educational attainment are disproportionately likely to provide missing responses.
+
+However, we proceeded with a complete case analysis (excluding missing values) for RQ2. This approach is methodologically sound because our logistic regression model explicitly controls for the very factors driving the missingness (Age and Education). Under a Missing at Random (MAR) assumption, conditioning on age and education helps mitigate selection bias in our coefficient estimates, because we explicitly control for the main predictors of nonresponse.
+
+### Model Results
+
+**Model calibration:** We evaluated the calibration of the survey weighted logistic regression for RQ2 using a weighted calibration plot. Predicted probabilities from the interaction model were grouped into ten bins based on deciles of the predicted risk. For each bin, we computed the weighted mean predicted probability and the weighted observed rate of fearing that regulation will “go too far”, using the Pew survey weights, and plotted these quantities against each other.
+
+The points fall close to the 45 degree reference line across the range of predicted risks, and the largest weighted groups (indicated by larger bubbles) also lie near this line. This pattern suggests no major evidence of miscalibration: groups that the model assigns higher predicted probabilities indeed exhibit higher observed rates, and the predicted probabilities align well with the weighted empirical proportions.
+
+```{r calibration-plot-q2, fig.height=3, fig.width=7, fig.cap="Weighted Calibration Plot"}
+# pred
+pred <- predict(model_inter, type = "response")
+pred <- as.numeric(pred)
+
+# variable
+wt <- as.numeric(weights(model_inter, type = "prior"))
+y  <- as.numeric(model_inter$y)
+
+data_with_pred <- data.frame(
+  pred    = pred,
+  outcome = y,
+  wt      = wt
+)
+
+# bins
+breaks <- quantile(data_with_pred$pred,
+                   probs = seq(0, 1, 0.1),
+                   na.rm = TRUE)
+breaks <- unique(breaks)
+
+data_with_pred$pred_group <- cut(
+  data_with_pred$pred,
+  breaks = breaks,
+  include.lowest = TRUE
+)
+
+# calibration
+calibration <- data_with_pred |>
+  group_by(pred_group) |>
+  summarise(
+    mean_pred = weighted.mean(pred, w = wt),
+    obs_rate  = weighted.mean(outcome, w = wt),
+    total_w   = sum(wt),
+    .groups   = "drop"
+  )
+
+# plot
+ggplot(calibration, aes(x = mean_pred, y = obs_rate)) +
+  geom_point(aes(size = total_w)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed") +
+  labs(
+    x = "Mean predicted probability (weighted)",
+    y = "Observed rate (weighted)",
+    size = "Total weight"
+  ) +
+  theme_minimal()
+```
+
+**Coefficient estimates:** Table 2 reports the corresponding coefficient estimates in odds ratio form, along with standard errors and p-values, for both the main effects model and the interaction model. The table highlights the strong negative association between lack of confidence in the federal government and fear of over-regulation, as well as the elevated odds for Black respondents relative to White respondents after adjusting for ideology and other demographics. These estimates provide the basis for the substantive interpretations discussed in the main text.
+
+```{r rq2-table, warning=FALSE, echo=FALSE}
+rename_map <- c(
+  "(Intercept)" = "Intercept",
+  
+  # --- Outcome ---
+  "conf_gov_fNo Confidence" = "Trust: No Confidence",
+  
+  # Ideology
+  "ideo_fVery conservative" = "Ideo: Very Cons.",
+  "ideo_fConservative" = "Ideo: Conservative",
+  "ideo_fLiberal" = "Ideo: Liberal",
+  "ideo_fVery liberal" = "Ideo: Very Liberal",
+  
+  # --- Variables ---
+  # Party
+  "party_fRepublican" = "Party: Republican",
+  "party_fIndependent" = "Party: Independent",
+  "party_fSomething else" = "Party: Other",
+  
+  # Age
+  "age_f30-49" = "Age: 30-49",
+  "age_f50-64" = "Age: 50-64",
+  "age_f65+" = "Age: 65+",
+  
+  # Race
+  "race_fBlack" = "Race: Black",
+  "race_fHispanic" = "Race: Hispanic",
+  "race_fAsian" = "Race: Asian",
+  "race_fOther" = "Race: Other",
+  
+  # Gender
+  "gender_fMale" = "Gender: Male",
+  
+  # Education
+  "edu_fSome College" = "Edu: Some College",
+  "edu_fCollege graduate+" = "Edu: College Grad+",
+  
+  # --- Interaction ---
+  "ideo_fVery conservative:conf_gov_fNo Confidence" = "Interact: V.Cons x No Trust",
+  "ideo_fConservative:conf_gov_fNo Confidence" = "Interact: Cons x No Trust",
+  "ideo_fLiberal:conf_gov_fNo Confidence" = "Interact: Lib x No Trust",
+  "ideo_fVery liberal:conf_gov_fNo Confidence" = "Interact: V.Lib x No Trust"
+)
+
+# Table
+modelsummary(
+  list("Main Effects (+Trust)" = model_main, "Interact (Ideo x Trust)" = model_inter),
+  exponentiate = TRUE, 
+  stars = FALSE,
+  coef_rename = rename_map,
+  gof_map = c("nobs", "aic"),
+  statistic = "({std.error}), p = {p.value}",
+  fmt = 3,
+  output = "kableExtra",
+  title = "Weighted Logistic Regression: Regulation Concern (OR > 1 indicates fear of Over-Regulation)"
+) |>
+  kableExtra::kable_styling(
+    latex_options = c("scale_down", "hold_position"), 
+    font_size = 9
+  )
+```
+
+### Conclusions
+
+Our analysis shows that confidence in the federal government is central to how Americans think about AI regulation. In the interaction model, the main effect of confidence is defined at the reference ideology category. Among ideological moderates, respondents who lack confidence in the federal government have much lower odds of fearing that AI regulation will “go too far” than moderates who trust it (OR = 0.43, p \< .01; Table 2). Model based predicted probabilities (Figure 3) show that ideological polarization over regulation is strongest among high confidence respondents: conservatives with high confidence have a much higher predicted probability of fearing over regulation than high confidence liberals, whereas among respondents with low confidence the predicted probabilities for liberals and conservatives are closer together and left–right differences are much smaller.
+
+In addition, Black respondents display distinct concern about over regulation. In the interaction model, Black respondents have substantially higher odds than White respondents of fearing that regulation will “go too far” (OR = 2.57, p \< .001; Table 2), even after adjusting for trust, ideology, and sociodemographics. Subgroup predicted probabilities for Black and White respondents show the same pattern of higher model based risk for Black adults, which is consistent with the view that historical experiences with state power shape how different groups perceive the risks of AI governance.
+
+### Limitations
+
+These findings should be interpreted in light of several limitations. First, incorporating the confidence in government measure reduces the RQ2 analytic sample from about 4,170 to 3,154 respondents, roughly a 24 percent drop driven by “not sure” or missing answers. We treat “not sure” as missing because our outcome is explicitly directional (more worried about regulation going too far versus not far enough), and we cannot assign respondents who decline to choose a side to either group without additional assumptions. As a result, the estimates are most representative of adults with clear opinions about government efficacy and AI regulation and may underrepresent more disengaged or undecided respondents.
+
+Second, the data are almost entirely categorical or ordinal, so we can distinguish who is more versus less concerned but not the precise intensity of concern on a continuous scale. Third, the analysis relies on a single observational, cross-sectional survey. Unobserved factors may influence both trust in government and regulatory attitudes, so we interpret the associations as descriptive patterns rather than causal effects.
